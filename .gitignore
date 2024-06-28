@@ -1,3 +1,10 @@
+# My personal settings
+工商普查原始/
+主計處行業別歷次修訂對照表.xlsx
+*.csv
+*.pdf
+*.zip
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

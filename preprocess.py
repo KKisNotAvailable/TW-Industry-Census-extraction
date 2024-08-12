@@ -1,3 +1,15 @@
+'''
+This program is to extract, preprocess, and do simple analysis on the 
+industrial census data.
+
+Notice:
+    1. only three columns were extracted in current version.
+    2. current version only support data in ROC year 85, 90, and 95 (1996, 2001, 2006)
+
+Author: KYK
+Date: Jun.24.2024
+'''
+
 import pandas as pd
 from os import listdir, getcwd
 from os.path import isfile, join
@@ -11,13 +23,18 @@ class Processor():
         self.__warn_data_not_collected = "Not yet processed, please collect the data first."
     
     def __slash_maker(self):
-        slashed_folder = self.upperlayer_folder + "\\" + self.folder
-        if slashed_folder[0] == "\\":
-            slashed_folder = slashed_folder[1:]
-        if slashed_folder[-1] == "\\":
-            slashed_folder = slashed_folder[:-1]
+        '''
+        This program is to align the slashes of the provided data file path.
+        (currently assumes user provide no mix of slashes and backslashes)
 
-        return "\\" + slashed_folder + "\\"
+        Return
+        ------
+            Correctly slashed file path.
+        '''
+        uf = self.upperlayer_folder.strip("\\").strip("/")
+        f = self.folder.strip("\\").strip("/")
+
+        return "\\" + uf + "\\" + f + "\\"
     
     def __zd_convertor(self, zd_format_series: pd.Series) -> pd.Series:
         '''
@@ -30,7 +47,12 @@ class Processor():
         
         Parameters
         ----------
-
+        zd_format_series: pd.Series
+            a series of numbers that is in the zd format.
+        
+        Return
+        ------
+            a series of numbers in the format we normally use.
         '''
         zd_map = {
             "{": [1, 0], "}": [-1, 0],
@@ -59,15 +81,20 @@ class Processor():
     def _extract(self, company_list: list) -> pd.DataFrame:
         '''
         The following are the column names and their position stated in the code.doc.
-        (Our target columns in files a to f in year 85 and 90 share the same position and length.)
+        (Our target columns in files "a" to "f" in year 85 and 90 share the same position and length.)
         85                | 90                  | 95
         x3103 (8)         | x310004 (12)        | scale (2)
         x3200 (14-17)     | x320000 (14-17)     | primary (3-6)
         x3613 (1139-1153) | x360013 (1069-1083) | x360019 (246-260)
         -----
         Parameters
-          company_list: list. 
-          >> It is the raw data read straight from the file, each element represents a company.
+        company_list: list. 
+            the raw data read straight from the file, each element represents a company.
+            and each element is a long string of info of the company.
+
+        Return
+        ------
+            a dataframe with extracted and processed data of designated columns.
         '''
         comps = pd.Series(company_list)
 
@@ -87,7 +114,7 @@ class Processor():
             primary_short = primary.str.slice(start=0, stop=2)
             asset = self.__zd_convertor(comps.str.slice(start=245, stop=260))
 
-        # axis=1 就是會每個series變成一個column
+        # concat with axis=1 means each series will turn into a column
         return pd.concat([scale, primary, primary_short, asset], axis=1).reset_index(drop=True)
 
     def collect_data(self) -> None:
@@ -102,17 +129,17 @@ class Processor():
             return
         
         print(f'\nStart collection data from folder "{self.folder}"...')
-        path = getcwd() + self.__slash_maker()
+        path = getcwd() + self.__slash_maker() # it assumes the code file is in the same path as the overall data folder
 
-        # list all the files without extension
+        # list all the files without extension (since the data are the files without extensions)
         target_files = [f for f in listdir(path) if isfile(join(path, f)) and "." not in f]
-        data_out = self.__data
+        data_out = self.__data # initiate data_out
 
         for cur_file in target_files:
             with open(join(path, cur_file), 'rb') as f:
                 text = f.read()
                 text = text.decode('ascii', 'ignore') # there are some bytes not encoded as ascii...
-                companies_raw = text.split("\r\n") # 可以去查一下\r\n是啥蠻有趣的，但從資料表現來看跟\n一樣，\r算是歷史遺物
+                companies_raw = text.split("\r\n") # 'rb' => "\r\n"; 'r' => "\n"
 
                 # I found there is an empty element in the end, currently simply remove the last one.
                 # TODO: might want to remove all empty from the back.
@@ -146,14 +173,21 @@ class Processor():
         self.__data = self.__data[cond1].reset_index(drop=True)
 
     def sic_mapping(self) -> None:
+        '''
+        This method maps the ROC SIC into ISIC.
+        Notice that the mapping is hard-coded, ROC year 85: ROCSIC6 etc, 
+
+        Will add a new column named "isic" after this method was called.
+        '''
         if not self._extracted:
             print(self.__warn_data_not_collected)
-            return        
+            return  
 
         # read the mapping table in
-        sic_tb = pd.read_excel("ISIC_to_ROCSIC.xlsx", sheet_name="工作表2")
+        sic_tb = pd.read_excel("ISIC_to_ROCSIC.xlsx", sheet_name="Sheet2")
 
-        # 這裡強制把所有都認定成string，後面split才不會把單一的int變成NaN
+        # force all elements as string, so that latter when splitting won't 
+        # turn single int into NaN
         if self.folder[:2] == "85":
             code_using = sic_tb['ROCSIC_6'].astype('string')
         elif self.folder[:2] == "90":
@@ -161,7 +195,7 @@ class Processor():
         elif self.folder[:2] == "95":
             code_using = sic_tb['ROCSIC_8'].astype('string')
         
-        # make the mapping with ROCSIC as key
+        # make the mapping with ROCSIC as key (in the table read in, ISIC is the key)
         # TODO: 不知道有沒有更好的辦法來對應這種數字但有可能變成前面帶0的文字
         rocsic_to_isic = {}
         code_using = code_using.str.split(",")
@@ -171,15 +205,16 @@ class Processor():
                     k = "0" + k
                 rocsic_to_isic[k] = sic_tb['ISIC_Rev3'][i]
 
-        print(rocsic_to_isic)
+        # print(rocsic_to_isic) # for checking the mapping result.
         self.__data['isic'] = self.__data['roc_sic'].map(rocsic_to_isic).fillna(rocsic_to_isic['Else'])
 
     def some_analysis(self) -> None:
         by_rocsic = self.__data.groupby(['roc_sic'])['asset'].sum().reset_index()
         by_isic = self.__data.groupby(['isic'])['asset'].sum().reset_index()
 
-        by_rocsic.to_csv(f'{self.folder[:3]}_groupby_rocsic_asset.csv', index=False)
-        by_isic.to_csv(f'{self.folder[:3]}_groupby_isic_asset.csv', index=False)
+        print(by_isic)
+        # by_rocsic.to_csv(f'{self.folder[:3]}_groupby_rocsic_asset.csv', index=False)
+        # by_isic.to_csv(f'{self.folder[:3]}_groupby_isic_asset.csv', index=False)
 
     def show_data(self) -> None:
         if not self._extracted:
@@ -215,7 +250,7 @@ def main():
         }
         p.apply_conditions(**conds)
         p.some_analysis()
-        p.output_CSV()
+        # p.output_CSV()
 
 
 if __name__ == "__main__":
